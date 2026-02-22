@@ -1,0 +1,23 @@
+FMIL: module = FMILIB, log level = 4: Loading 'win64' binary with 'default' platform types
+FMIL: module = Model, log level = 3: [][FMU status:Warning] CVODE: CVode failed with CV_TOO_MUCH_WORK:
+ At t = 1.68538e+07, mxstep steps taken before reaching tout.
+FMIL: module = Model, log level = 4: [CvodeStatistics][FMU status:OK] Sundials CVode Statistics
+    Stop time                                : 17452800.00 s
+    Simulation time                          : 24.63 s
+    Number of external steps                 : 672
+    Number of internal steps                 : 266440
+    Number of non-linear iterations          : 400369
+    Number of non-linear convergence failures: 485
+    Number of f function evaluations         : 400453
+    Number of g function evaluations         : 267138
+    Number of Jacobian-evaluations (direct)  : 4910
+    Maximum integration order                : 5
+    Suggested tolerance scale factor         : 1.0
+    Grouping used                            : yes
+
+FMIL: module = Model, log level = 4: [][FMU status:OK] Rejected count
+    Number of external steps                 : 0
+    Number of internal steps                 : 0
+    Number of f function evaluations         : 0
+    Number of Jac function evaluations       : 0
+

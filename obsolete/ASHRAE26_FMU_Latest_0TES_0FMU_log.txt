@@ -1,0 +1,5 @@
+FMIL: module = Model, log level = 3: [][FMU status:Warning] Warning: The following was detected at time: 51200.99953835901
+FMIL: module = Model, log level = 3: [][FMU status:Warning]   Warning: Battery is above maximum charge.
+  Failed condition: bat.cha.SOC <= 1
+
+FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
