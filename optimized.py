@@ -17,7 +17,7 @@ steps = int((stop_time - start_time) / step_size)
 # MPC 参数（强化套利）
 MPC_HORIZON_STEPS = 24        # 24 * 5min = 120min 预测窗
 SOC_MIN = 0.05
-SOC_MAX = 0.70
+SOC_MAX = 0.95
 SWITCH_PENALTY = 0.03         # 控制动作切换惩罚（元）
 CHARGE_SETPOINT_DROP_K = 5.0  # 与 baseline.py 一致：充电且夜间时降5°C
 LOW_PRICE_THRESHOLD = 0.5

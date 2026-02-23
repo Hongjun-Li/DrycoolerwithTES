@@ -91,7 +91,8 @@ def run_simulation(use_control=True):
         price = get_electricity_price(current_time)
         
         # 瞬时电量 (kWh) = 功率(W) * 时间(s) / 3,600,000
-        energy_step_kwh = (c_pit + c_phvac) * (step_size / 3600000.0)
+        # 仅考虑 HVAC 电费，不计 IT 电费
+        energy_step_kwh = c_phvac * (step_size / 3600000.0)
         total_cost += energy_step_kwh * price
         
         data['time'].append(current_time / 86400)
@@ -115,10 +116,10 @@ res_ctrl = run_simulation(use_control=True)
 final_saving = res_base['cum_cost'][-1] - res_ctrl['cum_cost'][-1]
 saving_percent = (final_saving / res_base['cum_cost'][-1]) * 100
 
-print(f"\n--- 经济效益分析 ---")
-print(f"基准总电费 (Baseline): {res_base['cum_cost'][-1]:.2f} 元")
-print(f"控制总电费 (Controlled): {res_ctrl['cum_cost'][-1]:.2f} 元")
-print(f"节省总金额 (Total Saving): {final_saving:.2f} 元 ({saving_percent:.2f}%)")
+print(f"\n--- HVAC电费经济效益分析 ---")
+print(f"基准总HVAC电费 (Baseline): {res_base['cum_cost'][-1]:.2f} 元")
+print(f"控制总HVAC电费 (Controlled): {res_ctrl['cum_cost'][-1]:.2f} 元")
+print(f"HVAC节省总金额 (Total Saving): {final_saving:.2f} 元 ({saving_percent:.2f}%)")
 
 # 4. 绘图：4行 x 2列 布局 (增加电价和成本)
 fig, axes = plt.subplots(4, 2, figsize=(12, 7), sharex=True)
@@ -137,12 +138,12 @@ axes[1,0].set_ylim(1.0, 1.2)
 axes[1,0].set_ylabel('PUE [-]')
 axes[1,0].set_title('Power Usage Effectiveness')
 
-# [2,0] 累计电费支出
+# [2,0] 累计HVAC电费支出
 axes[2,0].plot(res_ctrl['time'], res_ctrl['cum_cost'], label='Controlled Cost', color='green')
 axes[2,0].plot(res_base['time'], res_base['cum_cost'], label='Baseline Cost', color='gray', linestyle='--')
-axes[2,0].set_ylabel('Cum. Cost [Yuan]')
+axes[2,0].set_ylabel('Cum. HVAC Cost [Yuan]')
 axes[2,0].legend(loc='upper left')
-axes[2,0].set_title('Cumulative Electricity Cost')
+axes[2,0].set_title('Cumulative HVAC Electricity Cost')
 
 # [3,0] 累计节约金额曲线
 saving_curve = np.array(res_base['cum_cost']) - np.array(res_ctrl['cum_cost'])
