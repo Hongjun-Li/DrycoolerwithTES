@@ -8,9 +8,9 @@ from datetime import datetime, timedelta
 fmu_path = 'ASHRAE26_ChillerPlant_0tes_DataCenterDryFMU.fmu'
 model = load_fmu(fmu_path)
 
-# 仿真参数（第191天到第198天）
-SIM_START_DAY = 191
-SIM_END_DAY = 198
+# 仿真参数（第181天到第188天）
+SIM_START_DAY = 181
+SIM_END_DAY = 188
 start_time = 86400.0 * (SIM_START_DAY - 1)
 stop_time = 86400.0 * SIM_END_DAY
 step_size = 60.0             # 1分钟步长

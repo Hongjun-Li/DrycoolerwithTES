@@ -9,8 +9,8 @@ fmu_path = 'ASHRAE26_ChillerPlant_0tes_DataCenterDryFMU.fmu'
 model = load_fmu(fmu_path)
 
 # 仿真参数（第1天到第365天）
-SIM_START_DAY = 1
-SIM_END_DAY = 365
+SIM_START_DAY = 181
+SIM_END_DAY = 188
 start_time = 86400.0 * (SIM_START_DAY - 1)
 stop_time = 86400.0 * SIM_END_DAY
 step_size = 60.0             # 1分钟步长

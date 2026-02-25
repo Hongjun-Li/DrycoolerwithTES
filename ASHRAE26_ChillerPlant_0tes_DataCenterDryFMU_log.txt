@@ -1,0 +1,4 @@
+FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
+FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
+FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
+FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
