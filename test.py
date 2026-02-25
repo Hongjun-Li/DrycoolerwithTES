@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 fmu_path = 'ASHRAE26_ChillerPlant_0tes_DataCenterDryFMU.fmu'
 model = load_fmu(fmu_path)
 
-# 仿真参数（第1天到第365天）
+
 SIM_START_DAY = 181
 SIM_END_DAY = 188
 start_time = 86400.0 * (SIM_START_DAY - 1)
@@ -17,7 +17,7 @@ step_size = 60.0             # 1分钟步长
 steps = int((stop_time - start_time) / step_size)
 
 # 定义变量列表
-plot_vars = ['yPHVAC', 'yPIT', 'yPDCTFan', 'yPpum', 'yTdry', 'yTCWLeaTow', 'yTCDUSup', 'yTCDURet', 'ySOCtes']
+plot_vars = ['yPHVAC', 'yPIT', 'yPDCTFan', 'yPpum', 'yTdry', 'yTCWLeaTow', 'yTCWEntTow', 'yTCDUSup', 'yTCDURet', 'ySOCtes']
 
 def get_tou_period(time_seconds, base_date):
     """
@@ -246,11 +246,18 @@ axes[0,1].set_ylabel('Temp [°C]')
 axes[0,1].set_title('Environment & Electricity Price')
 
 # [1,1] 水路侧温度
-axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDUSup'])-273.15, label='T_CDU_Sup')
-axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDURet'])-273.15, label='T_CDU_Ret')
-axes[1,1].plot(res_base['time'], np.array(res_base['yTCDUSup'])-273.15, label='T_CDU_Sup (Base)', color='green', linestyle='--', alpha=0.7)
+# 控制模式
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDUSup'])-273.15, label='T_CDU_Sup', color='blue', linewidth=1.5)
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDURet'])-273.15, label='T_CDU_Ret', color='purple', linewidth=1.5)
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCWLeaTow'])-273.15, label='T_CW_Lea_Tow', color='orange', linewidth=1.5)
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCWEntTow'])-273.15, label='T_CW_Ent_Tow', color='red', linewidth=1.5)
+# 基准模式
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCDUSup'])-273.15, label='T_CDU_Sup (Base)', color='blue', linestyle='--', alpha=0.5)
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCDURet'])-273.15, label='T_CDU_Ret (Base)', color='purple', linestyle='--', alpha=0.5)
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCWLeaTow'])-273.15, label='T_CW_Lea_Tow (Base)', color='orange', linestyle='--', alpha=0.5)
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCWEntTow'])-273.15, label='T_CW_Ent_Tow (Base)', color='red', linestyle='--', alpha=0.5)
 axes[1,1].set_ylabel('Temp [°C]')
-axes[1,1].legend(loc='upper right', fontsize='x-small')
+axes[1,1].legend(loc='upper right', fontsize='x-small', ncol=2)
 axes[1,1].set_title('Water Loop Temperatures')
 
 # [2,1] 组件功率对比

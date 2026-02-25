@@ -17,7 +17,7 @@ step_size = 60.0             # 1分钟步长
 steps = int((stop_time - start_time) / step_size)
 
 # 定义变量列表
-plot_vars = ['yPHVAC', 'yPIT', 'yPDCTFan', 'yPpum', 'yTdry', 'yTCWLeaTow', 'yTCDUSup', 'yTCDURet', 'ySOCtes']
+plot_vars = ['yPHVAC', 'yPIT', 'yPDCTFan', 'yPpum', 'yTdry', 'yTCWLeaTow', 'yTCWEntTow', 'yTCDUSup', 'yTCDURet', 'ySOCtes']
 
 def get_tou_period(time_seconds, base_date):
     """
@@ -61,6 +61,27 @@ def get_electricity_price(time_seconds, base_date):
         if period == "mid":
             return 0.09217
         return 0.05683
+
+
+def forecast_average_price(time_seconds, base_date, horizon_hours=6, sample_seconds=900):
+    """Estimate mean TOU price over a future horizon (default 6h, sampled every 15 min)."""
+    horizon_seconds = max(sample_seconds, horizon_hours * 3600)
+    steps = max(1, int(horizon_seconds / sample_seconds))
+    prices = []
+    for i in range(1, steps + 1):
+        future_time = time_seconds + i * sample_seconds
+        prices.append(get_electricity_price(future_time, base_date))
+    return float(np.mean(prices)) if prices else get_electricity_price(time_seconds, base_date)
+
+
+def upcoming_on_peak(time_seconds, base_date, window_hours=3, sample_seconds=900):
+    """Check if an on-peak window starts within the next window_hours."""
+    future_span = max(1, int((window_hours * 3600) / sample_seconds))
+    for i in range(1, future_span + 1):
+        future_time = time_seconds + i * sample_seconds
+        if get_tou_period(future_time, base_date) == "on":
+            return True
+    return False
 
 
 def solve_tes_qp(price, soc, temp_cdu_sup_c, u_prev, soc_gain, soc_ref):
@@ -114,8 +135,8 @@ def solve_tes_qp(price, soc, temp_cdu_sup_c, u_prev, soc_gain, soc_ref):
     ub = min(ub, ub_soc)
 
     # 价格门控：保留经济性导向，但不“锁死”放电机会
-    charge_price_cap = 0.090
-    discharge_price_floor = 0.080
+    charge_price_cap = 0.080
+    discharge_price_floor = 0.095
     if price >= charge_price_cap:
         ub = min(ub, 0.0)
     if price <= discharge_price_floor:
@@ -162,8 +183,8 @@ def run_simulation(use_control=True):
     soc_gain_est = 0.001
     last_sig_tes = 0.0
     hold_timer_steps = 0
-    control_interval_steps = int(5 * 60 / step_size)    # 每5分钟决策一次
-    min_hold_steps = int(8 * 60 / step_size)            # 最小保持8分钟
+    control_interval_steps = int(15 * 60 / step_size)   # 每15分钟决策一次
+    min_hold_steps = int(12 * 60 / step_size)           # 最小保持12分钟，减少抖动
     step_idx = 0
 
     desc = "仿真(受控模式)" if use_control else "仿真(基准模式)"
@@ -183,11 +204,21 @@ def run_simulation(use_control=True):
 
             # SOC 参考轨迹：低价储能，高价释能
             if period == "off":
-                soc_ref = 0.78
+                base_soc_ref = 0.78
             elif period == "mid":
-                soc_ref = 0.38
+                base_soc_ref = 0.38
             else:
-                soc_ref = 0.30
+                base_soc_ref = 0.30
+
+            future_avg_price = forecast_average_price(current_time, base_date)
+            price_delta = future_avg_price - price
+            soc_bias = float(np.clip(price_delta / 0.05, -0.25, 0.25))
+            soc_ref = float(np.clip(base_soc_ref + soc_bias, 0.25, 0.90))
+
+            if upcoming_on_peak(current_time, base_date, window_hours=3):
+                soc_ref = max(soc_ref, 0.85)
+            if period == "on" and price_delta < -0.02:
+                soc_ref = min(soc_ref, 0.35)
 
             u_tes_raw, sig_qp = solve_tes_qp(
                 price=price,
@@ -347,11 +378,18 @@ axes[0,1].set_ylabel('Temp [°C]')
 axes[0,1].set_title('Environment & Electricity Price')
 
 # [1,1] 水路侧温度
-axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDUSup'])-273.15, label='T_CDU_Sup')
-axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDURet'])-273.15, label='T_CDU_Ret')
-axes[1,1].plot(res_base['time'], np.array(res_base['yTCDUSup'])-273.15, label='T_CDU_Sup (Base)', color='green', linestyle='--', alpha=0.7)
+# 控制模式
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDUSup'])-273.15, label='T_CDU_Sup', color='blue', linewidth=1.5)
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDURet'])-273.15, label='T_CDU_Ret', color='purple', linewidth=1.5)
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCWLeaTow'])-273.15, label='T_CW_Lea_Tow', color='orange', linewidth=1.5)
+axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCWEntTow'])-273.15, label='T_CW_Ent_Tow', color='red', linewidth=1.5)
+# 基准模式
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCDUSup'])-273.15, label='T_CDU_Sup (Base)', color='blue', linestyle='--', alpha=0.5)
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCDURet'])-273.15, label='T_CDU_Ret (Base)', color='purple', linestyle='--', alpha=0.5)
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCWLeaTow'])-273.15, label='T_CW_Lea_Tow (Base)', color='orange', linestyle='--', alpha=0.5)
+axes[1,1].plot(res_base['time'], np.array(res_base['yTCWEntTow'])-273.15, label='T_CW_Ent_Tow (Base)', color='red', linestyle='--', alpha=0.5)
 axes[1,1].set_ylabel('Temp [°C]')
-axes[1,1].legend(loc='upper right', fontsize='x-small')
+axes[1,1].legend(loc='upper right', fontsize='x-small', ncol=2)
 axes[1,1].set_title('Water Loop Temperatures')
 
 # [2,1] 组件功率对比
