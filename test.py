@@ -87,31 +87,56 @@ def run_simulation(use_control=True):
     for _ in tqdm(range(steps), desc=desc):
         # --- A. 获取传感器读数 ---
         soc = model.get('ySOCtes')[0]
+        t_cdu_sup = model.get('yTCDUSup')[0]  # 获取当前CDU供水温度
         try:
             t_db = model.get('weaBus.TDryBul')[0]
         except:
             t_db = 293.15
 
         if use_control:
-            # --- B. TES 控制逻辑 (按电价进行负荷转移，保留高价时段放电能力) ---
+            # --- B. TES 控制逻辑：温度优先，达到45°C时强制放电降温 ---
             period = get_tou_period(current_time, base_date)
             dt = base_date + timedelta(seconds=current_time)
             is_summer = 6 <= dt.month <= 9
 
+            # 温度监控：yTCDUSup 接近45°C时强制放电降温
+            t_cdu_sup_c = t_cdu_sup - 273.15  # 转换为摄氏度
+            temp_critical = t_cdu_sup_c >= 45.0  # 温度达到上限，紧急放电
+            temp_high = t_cdu_sup_c >= 44.0  # 温度接近上限，开始放电
+            temp_safe = t_cdu_sup_c < 42.0  # 温度恢复安全，可以恢复正常控制
+
             charge_allowed = period == "off"
             discharge_allowed = (period == "on") if is_summer else (period == "mid")
 
-            if sig_tes == 1.0:  # 充电中
-                if soc >= soc_charge_stop or not charge_allowed:
+            # 温度安全优先：温度过高时强制TES放电提供额外冷量
+            if temp_critical and soc > soc_discharge_stop:
+                # 温度≥45°C：强制放电（除非SOC已耗尽）
+                sig_tes = -1.0
+            elif temp_high and soc > soc_discharge_stop:
+                # 温度≥44°C：强制放电降温
+                sig_tes = -1.0
+            elif 42.0 <= t_cdu_sup_c < 44.0:
+                # 温度在42-44°C之间：禁止充电，如果在充电则停止
+                if sig_tes == 1.0:
                     sig_tes = 0.0
-            elif sig_tes == -1.0:  # 放电中
-                if soc <= soc_discharge_stop or not discharge_allowed:
-                    sig_tes = 0.0
-            else:  # 触发充电/放电
-                if charge_allowed and soc < soc_charge_stop:
-                    sig_tes = 1.0
-                elif discharge_allowed and soc > soc_discharge_stop:
-                    sig_tes = -1.0
+                # 如果在放电，检查是否需要停止
+                elif sig_tes == -1.0:
+                    if soc <= soc_discharge_stop:
+                        sig_tes = 0.0
+                # 否则保持当前状态
+            else:
+                # 温度<42°C：恢复基于电价的正常控制逻辑
+                if sig_tes == 1.0:  # 充电中
+                    if soc >= soc_charge_stop or not charge_allowed:
+                        sig_tes = 0.0
+                elif sig_tes == -1.0:  # 放电中
+                    if soc <= soc_discharge_stop or not discharge_allowed:
+                        sig_tes = 0.0
+                else:  # 待机状态，根据电价和SOC决定充放电
+                    if charge_allowed and soc < soc_charge_stop:
+                        sig_tes = 1.0
+                    elif discharge_allowed and soc > soc_discharge_stop:
+                        sig_tes = -1.0
         else:
             sig_tes = 0.0
 

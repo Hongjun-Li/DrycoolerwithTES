@@ -1,4 +1,3 @@
-FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
-FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
-FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
-FMIL: module = Model, log level = 2: [][FMU status:Error] fmi2GetDerivatives: dsblock_ failed, QiErr = 1
+FMIL: module = Model, log level = 1: [][FMU status:Fatal] The license file was not found. Use the environment variable "DYMOLA_RUNTIME_LICENSE" to specify your Dymola license file.
+
+FMIL: module = Model, log level = 1: [][FMU status:Fatal] Instantiation failed
