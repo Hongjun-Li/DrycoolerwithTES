@@ -116,7 +116,7 @@ def run_simulation(use_control=True):
             sig_tes = 0.0
 
         # --- C. Dry Cooler Setpoint 调节 ---
-        t_set = min(43 + 273.15, max(35 + 273.15, t_db + 5.0))
+        t_set = min(45 + 273.15, max(40 + 273.15, t_db + 5.0))
 
         # --- D. 执行步进 ---
         model.set('SigTES', sig_tes)
@@ -177,12 +177,29 @@ axes[1,0].set_ylim(1.0, 1.2)
 axes[1,0].set_ylabel('PUE [-]')
 axes[1,0].set_title('Power Usage Effectiveness')
 
-# [2,0] 累计HVAC电费支出
-axes[2,0].plot(res_ctrl['time'], res_ctrl['cum_cost'], label='Controlled Cost', color='green')
-axes[2,0].plot(res_base['time'], res_base['cum_cost'], label='Baseline Cost', color='gray', linestyle='--')
-axes[2,0].set_ylabel('Cum. HVAC Cost [USD]')
-axes[2,0].legend(loc='upper left')
-axes[2,0].set_title('Cumulative HVAC Electricity Cost')
+# [2,0] 基准/控制超过45°C的时间与温度曲线
+t_ctrl_cdu_sup = np.array(res_ctrl['yTCDUSup']) - 273.15
+t_base_cdu_sup = np.array(res_base['yTCDUSup']) - 273.15
+ctrl_over_45_h = np.sum(t_ctrl_cdu_sup > 45.0) * step_size / 3600.0
+base_over_45_h = np.sum(t_base_cdu_sup > 45.0) * step_size / 3600.0
+
+axes[2,0].plot(
+    res_ctrl['time'],
+    t_ctrl_cdu_sup,
+    label=f'Controlled T_CDU_Sup (>45°C: {ctrl_over_45_h:.2f} h)',
+    color='green'
+)
+axes[2,0].plot(
+    res_base['time'],
+    t_base_cdu_sup,
+    label=f'Baseline T_CDU_Sup (>45°C: {base_over_45_h:.2f} h)',
+    color='gray',
+    linestyle='--'
+)
+axes[2,0].axhline(45.0, color='red', linestyle='--', linewidth=1.0, label='45°C Threshold')
+axes[2,0].set_ylabel('T_CDU_Sup [°C]')
+axes[2,0].legend(loc='upper left', fontsize='x-small')
+axes[2,0].set_title('T_CDU_Sup Curve & Time Above 45°C')
 
 # [3,0] 累计节约金额曲线
 saving_curve = np.array(res_base['cum_cost']) - np.array(res_ctrl['cum_cost'])
@@ -204,7 +221,7 @@ axes[0,1].set_title('Environment & Electricity Price')
 axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDUSup'])-273.15, label='T_CDU_Sup')
 axes[1,1].plot(res_ctrl['time'], np.array(res_ctrl['yTCDURet'])-273.15, label='T_CDU_Ret')
 axes[1,1].plot(res_base['time'], np.array(res_base['yTCDUSup'])-273.15, label='T_CDU_Sup (Base)', color='green', linestyle='--', alpha=0.7)
-axes[1,1].axhline(45.0, color='red', linestyle='--', linewidth=1.0, label='45C')
+axes[1,1].axhline(45.0, color='red', linestyle='--', linewidth=1.0, label='32C')
 axes[1,1].set_ylabel('Temp [°C]')
 axes[1,1].legend(loc='upper right', fontsize='x-small')
 axes[1,1].set_title('Water Loop Temperatures')
