@@ -31,6 +31,13 @@ FMU_OUTPUTS = [
 TRANSITION_DELAY = 600.0
 MIN_ACTIVE_TIME = 3600.0
 MIN_IDLE_TIME = 1800.0
+QFLOW_FILTER_ALPHA = 0.2
+CHARGE_QFLOW_KEEP_FRAC = 0.10
+CHARGE_QFLOW_MIN_ABS = 10.0
+LOW_Q_EXIT_DELAY = 900.0
+CHARGE_EVAL_DELAY = 900.0
+MIN_SOC_GAIN_FOR_CHARGE = 0.01
+CHARGE_COOLDOWN = 2700.0
 
 
 def is_summer(dt):
@@ -76,10 +83,23 @@ def get_electricity_price(time_seconds, base_date):
     return rate / 100.0
 
 
-def update_tes_signal(mode, mode_timer, soc, current_time, step, base_date):
+def update_tes_signal(
+    mode,
+    mode_timer,
+    soc,
+    q_flow,
+    q_flow_scale,
+    current_time,
+    step,
+    base_date,
+    charge_low_q_timer,
+    charge_cooldown_timer,
+    charge_entry_soc,
+):
     dt = base_date + timedelta(seconds=current_time)
     current_period = get_tou_period(current_time, base_date)
     current_price = get_electricity_price(current_time, base_date)
+    charge_cooldown_timer = max(0.0, charge_cooldown_timer - step)
 
     future_times = current_time + np.arange(1, 25) * 3600.0
     future_prices = np.array([get_electricity_price(t, base_date) for t in future_times])
@@ -106,6 +126,7 @@ def update_tes_signal(mode, mode_timer, soc, current_time, step, base_date):
         and has_high_price_ahead
         and price_spread >= 0.05
         and current_period != "on"
+        and charge_cooldown_timer <= 0.0
     )
 
     discharge_request = (
@@ -116,51 +137,64 @@ def update_tes_signal(mode, mode_timer, soc, current_time, step, base_date):
 
     if mode == 'charge':
         active_time = mode_timer + step
-        hard_stop = soc >= charge_stop_soc
+        qflow_keep_threshold = max(CHARGE_QFLOW_MIN_ABS, q_flow_scale * CHARGE_QFLOW_KEEP_FRAC)
+        if q_flow < qflow_keep_threshold:
+            charge_low_q_timer += step
+        else:
+            charge_low_q_timer = 0.0
+
+        inefficient_charge = (
+            active_time >= CHARGE_EVAL_DELAY
+            and charge_entry_soc is not None
+            and (soc - charge_entry_soc) < MIN_SOC_GAIN_FOR_CHARGE
+        )
+        low_q_exit = charge_low_q_timer >= LOW_Q_EXIT_DELAY
+        hard_stop = soc >= charge_stop_soc or low_q_exit or inefficient_charge
         soft_stop = (not near_min_price) or (not has_high_price_ahead) or (current_period == "on")
         if hard_stop or (active_time >= MIN_ACTIVE_TIME and soft_stop):
-            return 'off', 0.0, 0.0
-        return 'charge', active_time, 1.0
+            cooldown = CHARGE_COOLDOWN if (low_q_exit or inefficient_charge) else charge_cooldown_timer
+            return 'off', 0.0, 0.0, 0.0, cooldown, None
+        return 'charge', active_time, 1.0, charge_low_q_timer, charge_cooldown_timer, charge_entry_soc
 
     if mode == 'discharge':
         active_time = mode_timer + step
         hard_stop = soc <= discharge_stop_soc
         soft_stop = not near_max_price
         if hard_stop or (active_time >= MIN_ACTIVE_TIME and soft_stop):
-            return 'off', 0.0, 0.0
-        return 'discharge', active_time, -1.0
+            return 'off', 0.0, 0.0, 0.0, charge_cooldown_timer, None
+        return 'discharge', active_time, -1.0, 0.0, charge_cooldown_timer, None
 
     if mode == 'charge_pending':
         if charge_request:
             next_timer = mode_timer + step
             if next_timer >= TRANSITION_DELAY:
-                return 'charge', 0.0, 1.0
-            return 'charge_pending', next_timer, 0.0
-        return 'off', 0.0, 0.0
+                return 'charge', 0.0, 1.0, 0.0, charge_cooldown_timer, soc
+            return 'charge_pending', next_timer, 0.0, 0.0, charge_cooldown_timer, None
+        return 'off', 0.0, 0.0, 0.0, charge_cooldown_timer, None
 
     if mode == 'discharge_pending':
         if discharge_request:
             next_timer = mode_timer + step
             if next_timer >= TRANSITION_DELAY:
-                return 'discharge', 0.0, -1.0
-            return 'discharge_pending', next_timer, 0.0
-        return 'off', 0.0, 0.0
+                return 'discharge', 0.0, -1.0, 0.0, charge_cooldown_timer, None
+            return 'discharge_pending', next_timer, 0.0, 0.0, charge_cooldown_timer, None
+        return 'off', 0.0, 0.0, 0.0, charge_cooldown_timer, None
 
     idle_time = mode_timer + step
     if idle_time < MIN_IDLE_TIME:
-        return 'off', idle_time, 0.0
+        return 'off', idle_time, 0.0, 0.0, charge_cooldown_timer, None
 
     if charge_request:
         if step >= TRANSITION_DELAY:
-            return 'charge', 0.0, 1.0
-        return 'charge_pending', step, 0.0
+            return 'charge', 0.0, 1.0, 0.0, charge_cooldown_timer, soc
+        return 'charge_pending', step, 0.0, 0.0, charge_cooldown_timer, None
 
     if discharge_request:
         if step >= TRANSITION_DELAY:
-            return 'discharge', 0.0, -1.0
-        return 'discharge_pending', step, 0.0
+            return 'discharge', 0.0, -1.0, 0.0, charge_cooldown_timer, None
+        return 'discharge_pending', step, 0.0, 0.0, charge_cooldown_timer, None
 
-    return 'off', idle_time, 0.0
+    return 'off', idle_time, 0.0, 0.0, charge_cooldown_timer, None
 
 
 def run_simulation(use_control=True):
@@ -181,10 +215,18 @@ def run_simulation(use_control=True):
     total_cost = 0.0
     tes_mode = 'off'
     tes_mode_timer = MIN_IDLE_TIME
+    q_flow_filtered = 0.0
+    q_flow_scale = CHARGE_QFLOW_MIN_ABS
+    charge_low_q_timer = 0.0
+    charge_cooldown_timer = 0.0
+    charge_entry_soc = None
 
     desc = "Simulation (Controlled)" if use_control else "Simulation (Baseline)"
     for _ in tqdm(range(steps), desc=desc):
         soc = model.get('ySOCtes')[0]
+        q_flow = model.get('yQflow')[0]
+        q_flow_filtered = (1.0 - QFLOW_FILTER_ALPHA) * q_flow_filtered + QFLOW_FILTER_ALPHA * q_flow
+        q_flow_scale = max(q_flow_scale, abs(q_flow_filtered))
 
         try:
             t_db = model.get('weaBus.TDryBul')[0]
@@ -192,13 +234,26 @@ def run_simulation(use_control=True):
             t_db = 293.15
 
         if use_control:
-            tes_mode, tes_mode_timer, sig_tes = update_tes_signal(
-                tes_mode, tes_mode_timer, soc, current_time, step_size, base_date
+            tes_mode, tes_mode_timer, sig_tes, charge_low_q_timer, charge_cooldown_timer, charge_entry_soc = update_tes_signal(
+                tes_mode,
+                tes_mode_timer,
+                soc,
+                q_flow_filtered,
+                q_flow_scale,
+                current_time,
+                step_size,
+                base_date,
+                charge_low_q_timer,
+                charge_cooldown_timer,
+                charge_entry_soc,
             )
         else:
             sig_tes = 0.0
             tes_mode = 'off'
             tes_mode_timer = MIN_IDLE_TIME
+            charge_low_q_timer = 0.0
+            charge_cooldown_timer = 0.0
+            charge_entry_soc = None
 
         t_set = min(41 + 273.15, max(273.15 + 27, t_db + 5.0))
 
