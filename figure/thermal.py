@@ -340,7 +340,7 @@ ax.fill_between(res_ctrl['time'], 45.0, t_ctrl_cdu_sup, where=ctrl_mask, color='
 ax.fill_between(res_base['time'], 45.0, t_base_cdu_sup, where=base_mask, color='gray', alpha=0.15)
 
 ax.axhline(45.0, color='red', linestyle='--', linewidth=1.0)
-ax.set_ylabel('T_CDU_Sup [°C]')
+ax.set_ylabel('Temperature [°C]')
 ax.set_xlabel('Time [Days]')
 ax.set_ylim(35, 50)
 
@@ -361,11 +361,10 @@ legend_lines = [
 ax.legend(
     legend_lines,
     legend_labels,
-    loc='upper center',
-    bbox_to_anchor=(0.5, 1.15),
+    loc='lower center',
+    bbox_to_anchor=(0.5, 0.02),
     ncol=4,
-    fontsize='small',
-    frameon=False
+    fontsize='medium'
 )
 
 ax.grid(True, linestyle=':', alpha=0.6)

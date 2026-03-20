@@ -322,18 +322,18 @@ fig, axes = plt.subplots(1, 2, figsize=(12, 3), sharex=True)
 plt.subplots_adjust(wspace=0.25)
 
 # 左图：组件功率
-axes[0].plot(res_ctrl['time'], res_ctrl['yPDCTFan'], label='Fan (Ctrl)', color='#ff9999')
-axes[0].plot(res_base['time'], res_base['yPDCTFan'], label='Fan (Base)', color='#ff9999', linestyle='--', alpha=0.6)
-axes[0].plot(res_ctrl['time'], res_ctrl['yPpum'], label='Pump (Ctrl)', color='#66b3ff')
-axes[0].plot(res_base['time'], res_base['yPpum'], label='Pump (Base)', color='#66b3ff', linestyle='--', alpha=0.6)
-axes[0].set_ylabel('Power [W]')
+axes[0].plot(res_ctrl['time'], np.array(res_ctrl['yPDCTFan']) / 1000.0, label='Fan (Ctrl)', color='#ff9999')
+axes[0].plot(res_base['time'], np.array(res_base['yPDCTFan']) / 1000.0, label='Fan (Base)', color='#ff9999', linestyle='--', alpha=0.6)
+axes[0].plot(res_ctrl['time'], np.array(res_ctrl['yPpum']) / 1000.0, label='Pump (Ctrl)', color='#66b3ff')
+axes[0].plot(res_base['time'], np.array(res_base['yPpum']) / 1000.0, label='Pump (Base)', color='#66b3ff', linestyle='--', alpha=0.6)
+axes[0].set_ylabel('Power [kW]')
 axes[0].set_title('Component Power Analysis')
 axes[0].legend(loc='upper right', fontsize='small')
 
 # 右图：HVAC 总功率
-axes[1].plot(res_ctrl['time'], res_ctrl['yPHVAC'], label='Controlled', color='red')
-axes[1].plot(res_base['time'], res_base['yPHVAC'], label='Baseline', color='blue', linestyle='--', alpha=0.6)
-axes[1].set_ylabel('HVAC Power [W]')
+axes[1].plot(res_ctrl['time'], np.array(res_ctrl['yPHVAC']) / 1000.0, label='Controlled', color='red')
+axes[1].plot(res_base['time'], np.array(res_base['yPHVAC']) / 1000.0, label='Baseline', color='blue', linestyle='--', alpha=0.6)
+axes[1].set_ylabel('HVAC Power [kW]')
 axes[1].set_title('Cooling Power Consumption')
 axes[1].legend(loc='upper right', fontsize='small')
 
