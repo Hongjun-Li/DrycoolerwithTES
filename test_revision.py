@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from datetime import datetime, timedelta
 
+TARIFF_REGION = "Miami"  # "NewYork" or "Miami"
+
 try:
     from pyfmi import load_fmu
 except ModuleNotFoundError as exc:
@@ -14,11 +16,12 @@ except ModuleNotFoundError as exc:
 fmu_path = 'ASHRAE26_ChillerPlant_0tes_DataCenterDryIBMTESFMU.fmu'
 model = load_fmu(fmu_path)
 
-SIM_START_DAY = 181
-SIM_END_DAY = 188
+SIM_START_DAY = 210
+SIM_END_DAY = 217
+WARMUP_DAYS = 3
 start_time = 86400.0 * (SIM_START_DAY - 1)
 stop_time = 86400.0 * SIM_END_DAY
-step_size = 300.0
+step_size = 600.0
 steps = int((stop_time - start_time) / step_size)
 
 FMU_INPUTS = ['TCWDry', 'SigTES']
@@ -39,8 +42,28 @@ CHARGE_EVAL_DELAY = 900.0
 MIN_SOC_GAIN_FOR_CHARGE = 0.01
 CHARGE_COOLDOWN = 2700.0
 
+FPL_SDTR1_OPTION_B = {
+    "name": "FPL SDTR-1 Option B",
+    "service_area": "Miami, FL",
+    "applicability_kw": (25, 499),
+    "fixed_charge_monthly": 33.71,
+    "demand_charge": {
+        "summer_on_peak_kw": 13.56,
+        "non_summer_peak_kw": 10.82,
+        "max_demand_kw": 0.79,
+    },
+    "energy_charge": {
+        "summer_on_peak_kwh": 0.11624,
+        "summer_off_peak_kwh": 0.01862,
+        "winter_on_peak_kwh": 0.05786,
+        "winter_off_peak_kwh": 0.01862,
+    }
+}
+
 
 def is_summer(dt):
+    if TARIFF_REGION == "Miami":
+        return 4 <= dt.month <= 10
     return dt.month in [6, 7, 8, 9]
 
 
@@ -51,6 +74,16 @@ def is_weekday(dt):
 def get_tou_period(time_seconds, base_date):
     dt = base_date + timedelta(seconds=time_seconds)
     hour = dt.hour + dt.minute / 60.0
+
+    if TARIFF_REGION == "Miami":
+        if is_summer(dt):
+            if is_weekday(dt) and 12 <= hour < 21:
+                return "on"
+            return "off"
+
+        if is_weekday(dt) and ((6 <= hour < 10) or (18 <= hour < 22)):
+            return "on"
+        return "off"
 
     if is_summer(dt):
         if is_weekday(dt) and 8 <= hour < 18:
@@ -68,6 +101,16 @@ def get_electricity_price(time_seconds, base_date):
     dt = base_date + timedelta(seconds=time_seconds)
     hour = dt.hour + dt.minute / 60.0
 
+    if TARIFF_REGION == "Miami":
+        if is_summer(dt):
+            if is_weekday(dt) and 12 <= hour < 21:
+                return FPL_SDTR1_OPTION_B["energy_charge"]["summer_on_peak_kwh"]
+            return FPL_SDTR1_OPTION_B["energy_charge"]["summer_off_peak_kwh"]
+
+        if is_weekday(dt) and ((6 <= hour < 10) or (18 <= hour < 22)):
+            return FPL_SDTR1_OPTION_B["energy_charge"]["winter_on_peak_kwh"]
+        return FPL_SDTR1_OPTION_B["energy_charge"]["winter_off_peak_kwh"]
+
     if is_summer(dt):
         rate = 26.20
         if is_weekday(dt):
@@ -81,6 +124,67 @@ def get_electricity_price(time_seconds, base_date):
     if is_weekday(dt) and 8 <= hour < 22:
         rate += 17.74
     return rate / 100.0
+
+
+def get_energy_rate(dt: datetime) -> float:
+    """
+    Return the TOU energy rate in $/kWh for a given datetime.
+    """
+    if TARIFF_REGION == "Miami":
+        if is_summer(dt):
+            if is_weekday(dt) and 12 <= (dt.hour + dt.minute / 60.0) < 21:
+                return FPL_SDTR1_OPTION_B["energy_charge"]["summer_on_peak_kwh"]
+            return FPL_SDTR1_OPTION_B["energy_charge"]["summer_off_peak_kwh"]
+
+        if is_weekday(dt) and ((6 <= (dt.hour + dt.minute / 60.0) < 10) or (18 <= (dt.hour + dt.minute / 60.0) < 22)):
+            return FPL_SDTR1_OPTION_B["energy_charge"]["winter_on_peak_kwh"]
+        return FPL_SDTR1_OPTION_B["energy_charge"]["winter_off_peak_kwh"]
+
+    return get_electricity_price((dt - datetime(dt.year, 1, 1)).total_seconds(), datetime(dt.year, 1, 1))
+
+
+def calculate_monthly_bill(
+    energy_kwh_by_timestep,
+    timestamps,
+    peak_demand_kw_season,
+    max_demand_kw_month
+) -> float:
+    """
+    Calculate a simplified monthly bill.
+    """
+    if len(energy_kwh_by_timestep) != len(timestamps):
+        raise ValueError("energy_kwh_by_timestep and timestamps must have the same length")
+
+    if not timestamps:
+        return 0.0
+
+    summer = is_summer(timestamps[0])
+
+    energy_cost = 0.0
+    for e_kwh, ts in zip(energy_kwh_by_timestep, timestamps):
+        rate = get_energy_rate(ts)
+        energy_cost += e_kwh * rate
+
+    fixed_charge = FPL_SDTR1_OPTION_B["fixed_charge_monthly"]
+
+    if summer:
+        seasonal_demand_cost = (
+            peak_demand_kw_season *
+            FPL_SDTR1_OPTION_B["demand_charge"]["summer_on_peak_kw"]
+        )
+    else:
+        seasonal_demand_cost = (
+            peak_demand_kw_season *
+            FPL_SDTR1_OPTION_B["demand_charge"]["non_summer_peak_kw"]
+        )
+
+    max_demand_cost = (
+        max_demand_kw_month *
+        FPL_SDTR1_OPTION_B["demand_charge"]["max_demand_kw"]
+    )
+
+    total = fixed_charge + seasonal_demand_cost + max_demand_cost + energy_cost
+    return total
 
 
 def update_tes_signal(
@@ -198,8 +302,9 @@ def update_tes_signal(
 
 
 def run_simulation(use_control=True):
+    warmup_start_time = max(0.0, start_time - 86400.0 * WARMUP_DAYS)
     model.reset()
-    model.setup_experiment(start_time=start_time)
+    model.setup_experiment(start_time=warmup_start_time)
     model.enter_initialization_mode()
     model.exit_initialization_mode()
 
@@ -210,7 +315,7 @@ def run_simulation(use_control=True):
     })
 
     base_date = datetime(2026, 1, 1)
-    current_time = start_time
+    current_time = warmup_start_time
     sig_tes = 0.0
     total_cost = 0.0
     tes_mode = 'off'
@@ -221,6 +326,49 @@ def run_simulation(use_control=True):
     charge_cooldown_timer = 0.0
     charge_entry_soc = None
 
+    warmup_steps = int((start_time - warmup_start_time) / step_size)
+
+    for _ in range(warmup_steps):
+        soc = model.get('ySOCtes')[0]
+        q_flow = model.get('yQflow')[0]
+        q_flow_filtered = (1.0 - QFLOW_FILTER_ALPHA) * q_flow_filtered + QFLOW_FILTER_ALPHA * q_flow
+        q_flow_scale = max(q_flow_scale, abs(q_flow_filtered))
+
+        try:
+            t_db = model.get('weaBus.TDryBul')[0]
+        except Exception:
+            t_db = 293.15
+
+        if use_control:
+            tes_mode, tes_mode_timer, sig_tes, charge_low_q_timer, charge_cooldown_timer, charge_entry_soc = update_tes_signal(
+                tes_mode,
+                tes_mode_timer,
+                soc,
+                q_flow_filtered,
+                q_flow_scale,
+                current_time,
+                step_size,
+                base_date,
+                charge_low_q_timer,
+                charge_cooldown_timer,
+                charge_entry_soc,
+            )
+        else:
+            sig_tes = 0.0
+            tes_mode = 'off'
+            tes_mode_timer = MIN_IDLE_TIME
+            charge_low_q_timer = 0.0
+            charge_cooldown_timer = 0.0
+            charge_entry_soc = None
+
+        t_set = min(41 + 273.15, max(273.15 + 37, t_db + 6.0))
+
+        model.set('SigTES', sig_tes)
+        model.set('TCWDry', t_set)
+        model.do_step(current_time, step_size, True)
+        current_time += step_size
+
+    current_time = start_time
     desc = "Simulation (Controlled)" if use_control else "Simulation (Baseline)"
     for _ in tqdm(range(steps), desc=desc):
         soc = model.get('ySOCtes')[0]
@@ -255,7 +403,7 @@ def run_simulation(use_control=True):
             charge_cooldown_timer = 0.0
             charge_entry_soc = None
 
-        t_set = min(41 + 273.15, max(273.15 + 27, t_db + 5.0))
+        t_set = min(41 + 273.15, max(273.15 + 27, t_db + 6.0))
 
         model.set('SigTES', sig_tes)
         model.set('TCWDry', t_set)
