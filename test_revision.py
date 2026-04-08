@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from datetime import datetime, timedelta
 
-TARIFF_REGION = "Miami"  # "NewYork" or "Miami"
+TARIFF_REGION = "NewYork"  # "NewYork" or "Miami"
 
 try:
     from pyfmi import load_fmu
@@ -13,11 +13,11 @@ except ModuleNotFoundError as exc:
         "that includes pyfmi before running test_revision.py."
     ) from exc
 
-fmu_path = 'ASHRAE26_ChillerPlant_0tes_DataCenterDryIBMTESFMU.fmu'
+fmu_path = 'ASHRAE26_ChillerPlant_0tes_Revision_DataCenterDryIBMTESRevisionFMU.fmu'
 model = load_fmu(fmu_path)
 
-SIM_START_DAY = 210
-SIM_END_DAY = 217
+SIM_START_DAY = 10
+SIM_END_DAY = 17
 WARMUP_DAYS = 3
 start_time = 86400.0 * (SIM_START_DAY - 1)
 stop_time = 86400.0 * SIM_END_DAY
