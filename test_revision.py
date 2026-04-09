@@ -13,7 +13,7 @@ except ModuleNotFoundError as exc:
         "that includes pyfmi before running test_revision.py."
     ) from exc
 
-fmu_path = 'ASHRAE26_ChillerPlant_0tes_Revision_DataCenterDryIBMTESRevisionFMU.fmu'
+fmu_path = 'ASHRAE26_ChillerPlant_0tes_Revision_DataCenterDryIBMTESRevisionFMUMiami.fmu'
 model = load_fmu(fmu_path)
 
 SIM_START_DAY = 205
@@ -41,23 +41,20 @@ LOW_Q_EXIT_DELAY = 900.0
 CHARGE_EVAL_DELAY = 900.0
 MIN_SOC_GAIN_FOR_CHARGE = 0.01
 CHARGE_COOLDOWN = 2700.0
+CDU_SUPPLY_MAX_C = 45.0
+CDU_SUPPLY_MAX_K = CDU_SUPPLY_MAX_C + 273.15
+CDU_SUPPLY_GUARD_BAND_K = 1.0
 
-FPL_SDTR1_OPTION_B = {
-    "name": "FPL SDTR-1 Option B",
-    "service_area": "Miami, FL",
-    "applicability_kw": (25, 499),
-    "fixed_charge_monthly": 33.71,
-    "demand_charge": {
-        "summer_on_peak_kw": 13.56,
-        "non_summer_peak_kw": 10.82,
-        "max_demand_kw": 0.79,
-    },
-    "energy_charge": {
-        "summer_on_peak_kwh": 0.11624,
-        "summer_off_peak_kwh": 0.01862,
-        "winter_on_peak_kwh": 0.05786,
-        "winter_off_peak_kwh": 0.01862,
-    }
+MIAMI_TOU_RATES = {
+    "on_peak_kwh": 0.26,
+    "off_peak_kwh": 0.09,
+}
+
+NEW_YORK_TOU_RATES = {
+    "summer_on_peak_kwh": 0.2786,
+    "summer_off_peak_kwh": 0.0522,
+    "winter_on_peak_kwh": 0.1711,
+    "winter_off_peak_kwh": 0.0522,
 }
 
 
@@ -76,24 +73,12 @@ def get_tou_period(time_seconds, base_date):
     hour = dt.hour + dt.minute / 60.0
 
     if TARIFF_REGION == "Miami":
-        if is_summer(dt):
-            if is_weekday(dt) and 12 <= hour < 21:
-                return "on"
-            return "off"
-
-        if is_weekday(dt) and ((6 <= hour < 10) or (18 <= hour < 22)):
+        if is_weekday(dt) and 12 <= hour < 21:
             return "on"
-        return "off"
-
-    if is_summer(dt):
-        if is_weekday(dt) and 8 <= hour < 18:
-            return "on"
-        if is_weekday(dt) and 18 <= hour < 22:
-            return "mid"
         return "off"
 
     if is_weekday(dt) and 8 <= hour < 22:
-        return "mid"
+        return "on"
     return "off"
 
 
@@ -102,45 +87,28 @@ def get_electricity_price(time_seconds, base_date):
     hour = dt.hour + dt.minute / 60.0
 
     if TARIFF_REGION == "Miami":
-        if is_summer(dt):
-            if is_weekday(dt) and 12 <= hour < 21:
-                return FPL_SDTR1_OPTION_B["energy_charge"]["summer_on_peak_kwh"]
-            return FPL_SDTR1_OPTION_B["energy_charge"]["summer_off_peak_kwh"]
+        if is_weekday(dt) and 12 <= hour < 21:
+            return MIAMI_TOU_RATES["on_peak_kwh"]
+        return MIAMI_TOU_RATES["off_peak_kwh"]
 
-        if is_weekday(dt) and ((6 <= hour < 10) or (18 <= hour < 22)):
-            return FPL_SDTR1_OPTION_B["energy_charge"]["winter_on_peak_kwh"]
-        return FPL_SDTR1_OPTION_B["energy_charge"]["winter_off_peak_kwh"]
+    if is_weekday(dt) and 8 <= hour < 22:
+        if is_summer(dt):
+            return NEW_YORK_TOU_RATES["summer_on_peak_kwh"]
+        return NEW_YORK_TOU_RATES["winter_on_peak_kwh"]
 
     if is_summer(dt):
-        rate = 26.20
-        if is_weekday(dt):
-            if 8 <= hour < 22:
-                rate += 27.40
-            if 8 <= hour < 18:
-                rate += 12.77
-        return rate / 100.0
-
-    rate = 7.51
-    if is_weekday(dt) and 8 <= hour < 22:
-        rate += 17.74
-    return rate / 100.0
+        return NEW_YORK_TOU_RATES["summer_off_peak_kwh"]
+    return NEW_YORK_TOU_RATES["winter_off_peak_kwh"]
 
 
 def get_energy_rate(dt: datetime) -> float:
     """
     Return the TOU energy rate in $/kWh for a given datetime.
     """
-    if TARIFF_REGION == "Miami":
-        if is_summer(dt):
-            if is_weekday(dt) and 12 <= (dt.hour + dt.minute / 60.0) < 21:
-                return FPL_SDTR1_OPTION_B["energy_charge"]["summer_on_peak_kwh"]
-            return FPL_SDTR1_OPTION_B["energy_charge"]["summer_off_peak_kwh"]
-
-        if is_weekday(dt) and ((6 <= (dt.hour + dt.minute / 60.0) < 10) or (18 <= (dt.hour + dt.minute / 60.0) < 22)):
-            return FPL_SDTR1_OPTION_B["energy_charge"]["winter_on_peak_kwh"]
-        return FPL_SDTR1_OPTION_B["energy_charge"]["winter_off_peak_kwh"]
-
-    return get_electricity_price((dt - datetime(dt.year, 1, 1)).total_seconds(), datetime(dt.year, 1, 1))
+    return get_electricity_price(
+        (dt - datetime(dt.year, 1, 1)).total_seconds(),
+        datetime(dt.year, 1, 1),
+    )
 
 
 def calculate_monthly_bill(
@@ -165,25 +133,8 @@ def calculate_monthly_bill(
         rate = get_energy_rate(ts)
         energy_cost += e_kwh * rate
 
-    fixed_charge = FPL_SDTR1_OPTION_B["fixed_charge_monthly"]
-
-    if summer:
-        seasonal_demand_cost = (
-            peak_demand_kw_season *
-            FPL_SDTR1_OPTION_B["demand_charge"]["summer_on_peak_kw"]
-        )
-    else:
-        seasonal_demand_cost = (
-            peak_demand_kw_season *
-            FPL_SDTR1_OPTION_B["demand_charge"]["non_summer_peak_kw"]
-        )
-
-    max_demand_cost = (
-        max_demand_kw_month *
-        FPL_SDTR1_OPTION_B["demand_charge"]["max_demand_kw"]
-    )
-
-    total = fixed_charge + seasonal_demand_cost + max_demand_cost + energy_cost
+    # The simplified TOU structure only models energy charges.
+    total = energy_cost
     return total
 
 
@@ -301,6 +252,20 @@ def update_tes_signal(
     return 'off', idle_time, 0.0, 0.0, charge_cooldown_timer, None
 
 
+def apply_cdu_supply_limit(t_set, y_tcdu_sup, use_control):
+    if not use_control:
+        return t_set
+
+    # Keep a small guard band so the controlled case stays below the CDU
+    # supply temperature ceiling even with model lag.
+    limited_t_set = min(t_set, CDU_SUPPLY_MAX_K - CDU_SUPPLY_GUARD_BAND_K)
+
+    if y_tcdu_sup >= CDU_SUPPLY_MAX_K:
+        limited_t_set = min(limited_t_set, y_tcdu_sup - CDU_SUPPLY_GUARD_BAND_K)
+
+    return limited_t_set
+
+
 def run_simulation(use_control=True):
     warmup_start_time = max(0.0, start_time - 86400.0 * WARMUP_DAYS)
     model.reset()
@@ -331,6 +296,7 @@ def run_simulation(use_control=True):
     for _ in range(warmup_steps):
         soc = model.get('ySOCtes')[0]
         q_flow = model.get('yQflow')[0]
+        y_tcdu_sup = model.get('yTCDUSup')[0]
         q_flow_filtered = (1.0 - QFLOW_FILTER_ALPHA) * q_flow_filtered + QFLOW_FILTER_ALPHA * q_flow
         q_flow_scale = max(q_flow_scale, abs(q_flow_filtered))
 
@@ -362,6 +328,7 @@ def run_simulation(use_control=True):
             charge_entry_soc = None
 
         t_set = min(41 + 273.15, max(273.15 + 37, t_db + 6.0))
+        t_set = apply_cdu_supply_limit(t_set, y_tcdu_sup, use_control)
 
         model.set('SigTES', sig_tes)
         model.set('TCWDry', t_set)
@@ -373,6 +340,7 @@ def run_simulation(use_control=True):
     for _ in tqdm(range(steps), desc=desc):
         soc = model.get('ySOCtes')[0]
         q_flow = model.get('yQflow')[0]
+        y_tcdu_sup = model.get('yTCDUSup')[0]
         q_flow_filtered = (1.0 - QFLOW_FILTER_ALPHA) * q_flow_filtered + QFLOW_FILTER_ALPHA * q_flow
         q_flow_scale = max(q_flow_scale, abs(q_flow_filtered))
 
@@ -404,6 +372,7 @@ def run_simulation(use_control=True):
             charge_entry_soc = None
 
         t_set = min(41 + 273.15, max(273.15 + 27, t_db + 6.0))
+        t_set = apply_cdu_supply_limit(t_set, y_tcdu_sup, use_control)
 
         model.set('SigTES', sig_tes)
         model.set('TCWDry', t_set)
