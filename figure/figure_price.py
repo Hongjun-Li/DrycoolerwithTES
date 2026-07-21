@@ -57,12 +57,12 @@ CITY_CONFIGS = [
     {
         "label": "New York",
         "region": "NewYork",
-        "fmu_name": "ASHRAE26_ChillerPlant_0tes_Revision_DataCenterDryIBMTESRevisionFMUNewYork.fmu",
+        "fmu_name": "ASHRAE26_ChillerPlant_0tes_Sec_0Revision_DataCenterDryIBMTESFMUNY.fmu",
     },
     {
         "label": "Miami",
         "region": "Miami",
-        "fmu_name": "ASHRAE26_ChillerPlant_0tes_Revision_DataCenterDryIBMTESRevisionFMUMiami.fmu",
+        "fmu_name": "ASHRAE26_ChillerPlant_0tes_Sec_0Revision_DataCenterDryIBMTESFMUFL.fmu",
     },
 ]
 

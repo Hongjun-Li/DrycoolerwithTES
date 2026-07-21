@@ -5,7 +5,7 @@ from tqdm import tqdm
 from datetime import datetime, timedelta
 
 # 1. 加载 FMU
-fmu_path = 'ASHRAE26_ChillerPlant_0tes_DataCenterDryFMU.fmu'
+fmu_path = 'ASHRAE26_ChillerPlant_0tes_Sec_0Revision_DataCenterDryIBMTESFMU.fmu'
 model = load_fmu(fmu_path)
 
 # 仿真参数（第181天到第188天）
@@ -16,8 +16,12 @@ stop_time = 86400.0 * SIM_END_DAY
 step_size = 60.0             # 1分钟步长
 steps = int((stop_time - start_time) / step_size)
 
-# 定义变量列表
-plot_vars = ['yPHVAC', 'yPIT', 'yPDCTFan', 'yPpum', 'yTdry', 'yTCWLeaTow', 'yTCWEntTow', 'yTCDUSup', 'yTCDURet', 'ySOCtes']
+# FMU outputs shown in the system diagram
+plot_vars = [
+    'yPHVAC', 'yPIT', 'yPDCTFan', 'yPCWpum', 'yPCDUpum', 'yPTranpum',
+    'yPUE', 'yTdry', 'yTCWLeaTow', 'yTCWEntTow', 'yTCDUSup',
+    'yTCDURet', 'yTtesRet', 'yQflow', 'ySOCtes'
+]
 
 def get_tou_period(time_seconds, base_date):
     """
@@ -254,8 +258,8 @@ def run_simulation(use_control=True):
             u_tes = 0.0
             sig_tes = 0.0
 
-        # --- C. Dry Cooler Setpoint 调节 ---
-        t_set = min(45 + 273.15, max(40 + 273.15, t_db + 5.0))
+        # --- C. Constant dry cooler setpoint: 27 degC ---
+        t_set = 273.15 + 27.0
 
         # --- D. 执行步进 ---
         model.set('SigTES', sig_tes)

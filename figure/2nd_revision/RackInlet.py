@@ -50,8 +50,8 @@ NEW_YORK_TOU_RATES = {
 
 FMU_OUTPUTS = ["ySOCtes", "yQflow", "yTCDUSup"]
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-OUTPUT_PATH = Path(__file__).resolve().parent / "cdu_temp_comparison.png"
+ROOT_DIR = Path(__file__).resolve().parents[2]
+OUTPUT_PATH = Path(__file__).resolve().parent / "cdu_temp_comparison.svg"
 
 CITY_CONFIGS = [
     {
@@ -74,6 +74,11 @@ def c_to_f(temp_c):
 
 def format_temp_ticklabels(ticks_c):
     return [f"{tick_c:.1f} / {c_to_f(tick_c):.1f}" for tick_c in ticks_c]
+
+
+def format_date_ticklabels(day_ticks):
+    base_date = datetime(2026, 1, 1)
+    return [(base_date + timedelta(days=float(day))).strftime("%b %d") for day in day_ticks]
 
 
 def is_summer(dt, region):
@@ -308,6 +313,8 @@ def run_city_simulation(city_config, use_control):
     current_time = START_TIME
     data = {var: [] for var in FMU_OUTPUTS}
     data["time"] = []
+    data["cum_cost"] = []
+    total_cost = 0.0
 
     desc = f"Simulating {city_config['label']} ({'TES' if use_control else 'No TES'})"
     for _ in tqdm(range(STEPS), desc=desc):
@@ -340,17 +347,23 @@ def run_city_simulation(city_config, use_control):
         else:
             sig_tes = 0.0
 
-        t_set = 273.15+37
+        t_set = 273.15 + 37
         t_set = apply_cdu_supply_limit(t_set, y_tcdu_sup, use_control)
         model.set("SigTES", sig_tes)
         model.set("TCWDry", t_set)
         model.do_step(current_time, STEP_SIZE, True)
 
+        hvac_power_w = model.get("yPHVAC")[0]
+        price = get_electricity_price(current_time, base_date, city_config["region"])
+        energy_step_kwh = hvac_power_w * STEP_SIZE / 3600000.0
+        total_cost += energy_step_kwh * price
+
         data["time"].append(current_time / 86400.0)
+        data["cum_cost"].append(total_cost)
         for var in FMU_OUTPUTS:
             value = model.get(var)[0]
             if var == "yTCDUSup":
-                value = value - 273.15
+                value = c_to_f(value - 273.15)
             data[var].append(value)
 
         current_time += STEP_SIZE
@@ -362,33 +375,37 @@ def draw_figure(results):
     plt.rcParams.update(
         {
             "font.size": 8,
-            "axes.titlesize": 10,
-            "axes.labelsize": 8,
-            "legend.fontsize": 6.5,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
+            "axes.titlesize": 12,
+            "axes.labelsize": 11,
+            "legend.fontsize": 9,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
         }
     )
 
-    fig, axes = plt.subplots(1, 2, figsize=(8.8, 2.3), sharex=True, sharey=True)
-    fig.subplots_adjust(wspace=0.30, left=0.08, right=0.98, bottom=0.23, top=0.84)
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.0), sharex=True, sharey=True)
+    fig.subplots_adjust(wspace=0.26, left=0.08, right=0.98, bottom=0.22, top=0.94)
 
     temp_values = []
     for city_data in results.values():
         for scenario_data in city_data.values():
             temp_values.extend(scenario_data["yTCDUSup"])
 
-    temp_min = min(39.5, np.floor(min(temp_values) * 2.0) / 2.0)
-    temp_max = max(45.5, np.ceil(max(temp_values) * 2.0) / 2.0)
-    temp_ticks = np.arange(temp_min, temp_max + 0.1, 2.5)
+    threshold_f = c_to_f(CDU_SUPPLY_MAX_C)
+    temp_min = min(103.0, np.floor(min(temp_values) / 2.0) * 2.0)
+    temp_max = max(116.0, np.ceil(max(temp_values) / 2.0) * 2.0)
+    temp_min = temp_min - (temp_max - temp_min) * 0.22
+    temp_ticks = np.arange(temp_min, temp_max + 0.1, 4.0)
+    x_ticks = np.arange(SIM_START_DAY - 1, SIM_END_DAY + 1, 1)
+    x_ticklabels = format_date_ticklabels(x_ticks)
 
     line_colors = {
-        "no_tes": "#666666",
-        "tes": "#2ca02c",
+        "no_tes": "#0066ff",
+        "tes": "#ff1f1f",
     }
     scenario_labels = {
-        "no_tes": "Baseline",
-        "tes": "Controlled",
+        "no_tes": "Without TES",
+        "tes": "With TES",
     }
 
     for ax, city_name in zip(axes, ("New York", "Miami")):
@@ -396,43 +413,48 @@ def draw_figure(results):
         handles = []
         labels = []
 
-        for scenario_key in ("tes", "no_tes"):
+        for scenario_key in ("no_tes", "tes"):
             scenario_data = city_results[scenario_key]
-            over_45_hours = np.sum(np.array(scenario_data["yTCDUSup"]) > 45.0) * STEP_SIZE / 3600.0
+            over_threshold_hours = np.sum(np.array(scenario_data["yTCDUSup"]) > threshold_f) * STEP_SIZE / 3600.0
             line = ax.plot(
                 scenario_data["time"],
                 scenario_data["yTCDUSup"],
                 color=line_colors[scenario_key],
-                linewidth=1.4,
+                linewidth=1.6,
                 alpha=0.95,
-                label=f"{scenario_labels[scenario_key]} (>45C: {over_45_hours:.2f} h)",
+                label=f"{scenario_labels[scenario_key]} (>{threshold_f:.0f}°F: {over_threshold_hours:.2f} h)",
             )[0]
             handles.append(line)
             labels.append(line.get_label())
 
         threshold = ax.axhline(
-            45.0,
-            color="#ff4d4d",
+            threshold_f,
+            color="#7f7f7f",
             linestyle="--",
-            linewidth=1.1,
-            label="45C Threshold",
+            linewidth=1.2,
+            label=f"{threshold_f:.0f}°F threshold",
         )
         handles.append(threshold)
-        labels.append("45C Threshold")
+        labels.append(f"{threshold_f:.0f}°F threshold")
 
-        ax.set_title(f"{city_name}\nCDU supply temperature and hours above 45C")
-        ax.set_ylabel("T_CDU_Sup [C / F]")
+        ax.set_ylabel("Rack inlet temperature [°F]")
         ax.set_xlim(SIM_START_DAY - 1, SIM_END_DAY)
-        ax.set_xticks(np.arange(SIM_START_DAY - 1, SIM_END_DAY + 1, 1))
+        ax.set_xticks(x_ticks)
+        ax.set_xticklabels(x_ticklabels)
         ax.set_ylim(temp_min, temp_max)
         ax.set_yticks(temp_ticks)
-        ax.set_yticklabels(format_temp_ticklabels(temp_ticks))
+        ax.tick_params(axis="y", labelleft=True)
         ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.35)
-        if city_name == "New York":
-            ax.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.98, 0.63), frameon=False)
-        else:
-            ax.legend(handles, labels, loc="lower right", frameon=False)
-        ax.set_xlabel("Time [Days]")
+        ax.legend(
+            handles,
+            labels,
+            loc="lower left",
+            frameon=True,
+            facecolor="white",
+            edgecolor="none",
+            framealpha=0.92,
+        )
+        ax.set_xlabel("Date")
 
     return fig
 
@@ -445,6 +467,17 @@ def main():
             "no_tes": run_city_simulation(city_config, use_control=False),
             "tes": run_city_simulation(city_config, use_control=True),
         }
+
+    print("\n--- HVAC Electricity Cost Savings ---")
+    for city_name, city_results in results.items():
+        baseline_cost = city_results["no_tes"]["cum_cost"][-1]
+        controlled_cost = city_results["tes"]["cum_cost"][-1]
+        savings = baseline_cost - controlled_cost
+        savings_percent = savings / baseline_cost * 100.0 if baseline_cost else 0.0
+        print(f"{city_name}:")
+        print(f"  Baseline cost:   {baseline_cost:.2f} USD")
+        print(f"  Controlled cost: {controlled_cost:.2f} USD")
+        print(f"  Savings:         {savings:.2f} USD ({savings_percent:.2f}%)")
 
     fig = draw_figure(results)
     fig.savefig(OUTPUT_PATH, dpi=300, bbox_inches="tight")
